@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FinTrack - Simple Expense Tracker</title>
+
+  <!-- Tailwind for quick styling (optional) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* small custom styles to keep it neat */
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f8fafc; color:#0f172a; }
+    .modal-backdrop { background: rgba(0,0,0,0.45); position: fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:50; }
+    .modal { background:#fff; border-radius:12px; box-shadow:0 10px 30px rgba(2,6,23,0.15); width:100%; max-width:520px; padding:20px; }
+    .hidden { display:none; }
+    table td, table th { padding:12px 16px; }
+    .btn { padding:8px 12px; border-radius:8px; cursor:pointer; }
+    .btn-primary { background: #4f46e5; color:white; }
+    .btn-danger { background: #ef4444; color:white; }
+    .small-muted { font-size:12px; color:#6b7280; }
+    .hover-row:hover { background:#f1f5f9; }
+  </style>
+</head>
+<body>
+
+  <nav class="bg-white shadow-sm">
+    <div class="max-w-6xl mx-auto px-4 py-4 flex items-center">
+      <div class="flex items-center">
+        <div class="h-8 w-8 bg-indigo-600 rounded-full mr-3"></div>
+        <div class="font-bold text-lg">FinTrack</div>
+      </div>
+      <div class="ml-auto">
+        <button id="openAddBtn" class="btn btn-primary">+ Add</button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-4 py-8">
+    <!-- Summary -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <div class="small-muted">Total Balance</div>
+        <div id="balance" class="text-2xl font-bold mt-2">$0.00</div>
+      </div>
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <div class="small-muted">Total Income</div>
+        <div id="income" class="text-2xl font-semibold mt-2 text-green-600">$0.00</div>
+      </div>
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <div class="small-muted">Total Expenses</div>
+        <div id="expenses" class="text-2xl font-semibold mt-2 text-red-600">$0.00</div>
+      </div>
+    </section>
+
+    <!-- Analytics & Controls -->
+    <section class="grid lg:grid-cols-2 gap-4 mb-6">
+      <div class="bg-white p-5 rounded-xl shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold">Spending by Category</h3>
+        </div>
+        <div style="height:260px"><canvas id="catChart"></canvas></div>
+      </div>
+
+      <div class="bg-white p-5 rounded-xl shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold">Transactions</h3>
+          <div class="flex items-center gap-3">
+            <input id="search" class="px-3 py-2 border rounded-lg" placeholder="Search..." />
+            <select id="sort" class="px-3 py-2 border rounded-lg">
+              <option value="date_desc">Date (Newest)</option>
+              <option value="date_asc">Date (Oldest)</option>
+              <option value="amount_desc">Amount (High)</option>
+              <option value="amount_asc">Amount (Low)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full bg-white">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="text-left small-muted">Transaction</th>
+                <th class="text-left small-muted">Date</th>
+                <th class="text-right small-muted">Amount</th>
+                <th class="text-center small-muted">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tlist"></tbody>
+          </table>
+          <div id="empty" class="text-center py-8 small-muted hidden">No transactions yet. Add one!</div>
+        </div>
+
+        <div class="text-right mt-4">
+          <button id="clearAll" class="btn btn-danger">Clear All Data</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add/Edit Modal -->
+  <div id="modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <h2 id="modalTitle" class="text-lg font-semibold mb-2">Add Transaction</h2>
+      <form id="form">
+        <input type="hidden" id="txId" />
+        <div class="mb-3">
+          <label class="small-muted">Title</label>
+          <input id="title" required class="w-full px-3 py-2 border rounded-lg" />
+        </div>
+        <div class="mb-3">
+          <label class="small-muted">Amount</label>
+          <input id="amount" type="number" step="0.01" min="0" required class="w-full px-3 py-2 border rounded-lg" />
+        </div>
+
+        <div class="mb-3">
+          <label class="small-muted">Type</label>
+          <div class="mt-2 flex gap-4">
+            <label><input type="radio" name="type" value="income" checked /> <span class="ml-2">Income</span></label>
+            <label><input type="radio" name="type" value="expense" /> <span class="ml-2">Expense</span></label>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="small-muted">Category</label>
+          <select id="category" class="w-full px-3 py-2 border rounded-lg">
+            <option>Food</option><option>Bills</option><option>Rent</option><option>Shopping</option><option>Transport</option><option>Entertainment</option><option>Health</option><option>Salary</option><option>Other</option>
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="small-muted">Date</label>
+          <input id="date" type="date" required class="w-full px-3 py-2 border rounded-lg" />
+        </div>
+
+        <div class="flex justify-end gap-3">
+          <button type="button" id="cancel" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="confirmModal" class="modal-backdrop hidden">
+    <div class="modal text-center">
+      <p id="confirmText">Are you sure?</p>
+      <div class="mt-4 flex justify-center gap-3">
+        <button id="confirmNo" class="btn">Cancel</button>
+        <button id="confirmYes" class="btn btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const openAddBtn = document.getElementById('openAddBtn');
+  const modal = document.getElementById('modal');
+  const form = document.getElementById('form');
+  const modalTitle = document.getElementById('modalTitle');
+  const cancelBtn = document.getElementById('cancel');
+  const txIdInput = document.getElementById('txId');
+  const tlist = document.getElementById('tlist');
+  const emptyBox = document.getElementById('empty');
+  const balanceEl = document.getElementById('balance');
+  const incomeEl = document.getElementById('income');
+  const expensesEl = document.getElementById('expenses');
+  const searchInput = document.getElementById('search');
+  const sortSelect = document.getElementById('sort');
+  const clearAllBtn = document.getElementById('clearAll');
+  const confirmModal = document.getElementById('confirmModal');
+  const confirmText = document.getElementById('confirmText');
+  const confirmYes = document.getElementById('confirmYes');
+  const confirmNo = document.getElementById('confirmNo');
+
+  let catChart = null;
+  const catCtx = document.getElementById('catChart').getContext('2d');
+  let txns = [];
+
+  const save = () => localStorage.setItem('txns', JSON.stringify(txns));
+  const load = () => {
+    const raw = localStorage.getItem('txns');
+    if (raw) {
+      try { txns = JSON.parse(raw); }
+      catch { txns = []; }
+    } else {
+      const today = new Date().toISOString().split('T')[0];
+      txns = [
+        { id: 1, title: 'Monthly Salary', amount: 3500, type: 'income', category: 'Salary', date: today },
+        { id: 2, title: 'Groceries', amount: 150.75, type: 'expense', category: 'Food', date: today }
+      ];
+      save();
+    }
+  };
+
+  const formatCurrency = (n) => {
+    return new Intl.NumberFormat('en-US', { style:'currency', currency:'USD' }).format(n);
+  };
+
+  const formatDate = (d) => {
+    if(!d) return '';
+    const dt = new Date(d + 'T00:00:00');
+    return dt.toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+  };
+
+  const renderSummary = () => {
+    const income = txns.filter(t => t.type === 'income').reduce((s,t)=>s + Number(t.amount),0);
+    const expenses = txns.filter(t => t.type === 'expense').reduce((s,t)=>s + Number(t.amount),0);
+    const bal = income - expenses;
+    balanceEl.textContent = formatCurrency(bal);
+    incomeEl.textContent = formatCurrency(income);
+    expensesEl.textContent = formatCurrency(expenses);
+  };
+
+  const renderList = () => {
+    const q = (searchInput.value || '').toLowerCase();
+    const sort = sortSelect.value;
+
+    let list = txns.filter(t => {
+      return (t.title || '').toLowerCase().includes(q) || (t.category || '').toLowerCase().includes(q);
+    });
+
+    list.sort((a,b) => {
+      if (sort === 'date_asc') return new Date(a.date) - new Date(b.date);
+      if (sort === 'date_desc') return new Date(b.date) - new Date(a.date);
+      if (sort === 'amount_asc') return a.amount - b.amount;
+      if (sort === 'amount_desc') return b.amount - a.amount;
+      return 0;
+    });
+
+    tlist.innerHTML = '';
+    if (list.length === 0) {
+      emptyBox.classList.remove('hidden');
+    } else {
+      emptyBox.classList.add('hidden');
+      list.forEach(tx => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover-row';
+        tr.innerHTML = `
+          <td>
+            <div class="font-semibold">${escapeHtml(tx.title)}</div>
+            <div class="small-muted">${escapeHtml(tx.category)}</div>
+          </td>
+          <td class="small-muted">${formatDate(tx.date)}</td>
+          <td class="text-right ${tx.type === 'income' ? 'text-green-600' : 'text-red-600'} font-medium">${tx.type === 'income' ? '+' : '-'} ${formatCurrency(tx.amount)}</td>
+          <td class="text-center">
+            <button data-id="${tx.id}" class="edit btn small">Edit</button>
+            <button data-id="${tx.id}" class="del btn btn-danger small">Delete</button>
+          </td>
+        `;
+        tlist.appendChild(tr);
+      });
+    }
+  };
+
+  const renderChart = () => {
+    const expenseByCat = txns.filter(t => t.type === 'expense')
+      .reduce((acc, t) => { acc[t.category] = (acc[t.category] || 0) + Number(t.amount); return acc; }, {});
+    const labels = Object.keys(expenseByCat);
+    const data = labels.map(l => expenseByCat[l]);
+
+    if (catChart) catChart.destroy();
+
+    if (labels.length === 0) {
+      catCtx.clearRect(0,0, catCtx.canvas.width, catCtx.canvas.height);
+      return;
+    }
+
+    catChart = new Chart(catCtx, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{ data, backgroundColor: ['#4f46e5','#10b981','#ef4444','#f97316','#3b82f6','#8b5cf6','#ec4899'] }]
+      },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}} }
+    });
+  };
+
+  openAddBtn.addEventListener('click', () => openModalFor(null));
+  cancelBtn.addEventListener('click', () => closeModal());
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+
+  function openModalFor(tx) {
+    form.reset();
+    if (tx) {
+      modalTitle.textContent = 'Edit Transaction';
+      txIdInput.value = tx.id;
+      form.title.value = tx.title;
+      form.amount.value = tx.amount;
+      form.querySelector(`input[name="type"][value="${tx.type}"]`).checked = true;
+      form.category.value = tx.category;
+      form.date.value = tx.date;
+    } else {
+      modalTitle.textContent = 'Add Transaction';
+      txIdInput.value = '';
+      form.date.value = new Date().toISOString().split('T')[0];
+    }
+    modal.classList.remove('hidden');
+  }
+
+  function closeModal() { modal.classList.add('hidden'); }
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return s.replace(/[&<>"']/g, (m)=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const id = txIdInput.value;
+    const newTx = {
+      id: id ? Number(id) : Date.now(),
+      title: form.title.value.trim(),
+      amount: Number(form.amount.value),
+      type: form.querySelector('input[name="type"]:checked').value,
+      category: form.category.value,
+      date: form.date.value
+    };
+
+    if (!newTx.title || isNaN(newTx.amount) || !newTx.date) {
+      alert('Please complete the form');
+      return;
+    }
+
+    if (id) {
+      txns = txns.map(t => t.id === Number(id) ? newTx : t);
+    } else {
+      txns.push(newTx);
+    }
+
+    save();
+    renderAll();
+    closeModal();
+  });
+
+  tlist.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('.edit');
+    const delBtn = e.target.closest('.del');
+    if (editBtn) {
+      const id = Number(editBtn.dataset.id);
+      const tx = txns.find(t => t.id === id);
+      openModalFor(tx);
+    }
+    if (delBtn) {
+      const id = Number(delBtn.dataset.id);
+      confirmAction(`Delete this transaction?`, () => {
+        txns = txns.filter(t => t.id !== id);
+        save(); renderAll();
+      });
+    }
+  });
+
+  function confirmAction(text, onYes) {
+    confirmText.textContent = text;
+    confirmModal.classList.remove('hidden');
+    const yesFn = () => { onYes(); closeConfirm(); };
+    const noFn = () => closeConfirm();
+    confirmYes.addEventListener('click', yesFn, {once:true});
+    confirmNo.addEventListener('click', noFn, {once:true});
+    confirmModal.addEventListener('click', (e) => { if (e.target === confirmModal) { closeConfirm(); } }, {once:true});
+  }
+  function closeConfirm() { confirmModal.classList.add('hidden'); }
+
+  clearAllBtn.addEventListener('click', () => {
+    confirmAction('Clear ALL transactions? This cannot be undone.', () => {
+      txns = []; save(); renderAll();
+    });
+  });
+
+  searchInput.addEventListener('input', renderList);
+  sortSelect.addEventListener('change', renderList);
+
+  function renderAll() { renderSummary(); renderList(); renderChart(); }
+
+  load();
+  renderAll();
+})();
+</script>
+</body>
+</html>
